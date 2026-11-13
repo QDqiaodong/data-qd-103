@@ -16,6 +16,7 @@ build/
 dist/
 run/
 examples/flash/generated/
+examples/handoff/generated/
 *.sqlite*
 *.duckdb*
 *.db

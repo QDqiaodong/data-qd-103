@@ -1,0 +1,9 @@
+trip_id,sensor_id,uncertainty_c
+HA,A1,0
+HA,A2,0
+HB,B1,0
+HB,B2,0
+HC,C1,1
+HC,C2,0.5
+HC,C3,0.5
+HC,C4,1
