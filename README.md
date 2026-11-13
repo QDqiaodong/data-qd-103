@@ -55,14 +55,38 @@ Python 调用为 `cold_exposure.consensus_pipeline.run_consensus(trips, assignme
 
 该共识是合成演示分析策略，不是统计置信区间、真实温度保证或食品药品放行标准。`data/consensus/` 下为覆盖单点共识、分离分量、部分越界、断测、窗口外夹持和侧别切换等场景的原创合成数据。
 
+## 离线闪存镜像转录（CCLOG01，合成设备协议）
+
+冷链记录仪交回的是整片闪存镜像：物理槽位写满后循环覆盖，重启又让秒计数器从头开始。新增 `cold_exposure.flash` 子包只信任所选头声明的有效采样序列，用人工校时锚点还原 UTC，输出原 v1/v2 分析器可直接读取的 `readings.csv` 和逐槽位审计 `transcription.json`。CCLOG01 是本项目原创的合成协议，不兼容任何厂商设备，不涉及真实硬件、串口、网络、数据库或真实运输数据；只用 Python 3.11+ 标准库。
+
+```sh
+python tools/build_flash_examples.py --output-dir examples/flash/generated
+python -m cold_exposure.flash \
+    --image examples/flash/generated/scenario1.bin \
+    --anchors examples/flash/generated/scenario1.anchors.json \
+    --output-dir run/flash/scenario1
+```
+
+Python 调用为 `cold_exposure.flash.transcribe(image, anchors, output_dir)`；分步 API 为 `capture_inputs`（每份输入只捕获一次字节）、`transcribe_capture`、`publish`。要点（完整协议见 `docs/flash.md`）：
+
+- 两个 64 字节头副本独立校验（魔数、字段、保留字节、CRC32），按 generation 模 2^32 距离选头：半圈差拒绝、同代仅前 60 字节完全相同才规范选 A、两头全坏失败；新头有效但活动槽损坏时整次失败，不退回旧头掩盖损坏。
+- 活动槽严格按 `(next_slot-count+j) mod capacity`、预期 seq 按 `(next_seq-count+j) mod 2^32` 读取，不扫描其余槽位；槽 CRC、seq 精确匹配、保留字节和温度边界（-10000..15000 百分度）任一错误都带槽号与绝对偏移拒绝。百分度转两位小数不经过 float。
+- 同 `boot_id` 必须连续（A,B,A 拒绝）；段内 tick 差按模 2^32 计算，只接受 1..2^31-1，零差与半圈及以上拒绝；各 boot 段独立展开，不跨重启推算。
+- 锚点为严格 UTF-8 JSON（拒绝重复键、布尔整数），每个有效 boot 段至少一个锚点、只能引用当前有效记录；同段多锚点必须推导出完全相同的 UTC 偏移，规范锚点取段内最早逻辑位置而不是 JSON 顺序。跨 boot 不假定墙钟单调，最终按 UTC 排序；同 sensor 同一 UTC 秒即使温度相同也拒绝。
+- 输出目录必须原先存在性检查通过且不跟随符号链接；两文件在同级私有暂存目录写好后一次改名发布，失败无正式半套结果、暂存被清理、输入不变、同目标可重跑。相同输入字节在两个新目录得到字节一致的产物；审计含两份头的原始 hex、每记录物理槽/偏移/完整 24 字节 hex 与 CSV 行号映射，但不保存整片镜像、不证明设备真实测量。
+- 转录不做运输窗口裁剪、插值、首尾补样、多记录仪融合或新增暴露指标；输出 CSV 表头仍为 `sensor_id,observed_at,temperature_c`，可直接配合既有 trips/assignments 进入 v1 或 v2 消费者。
+
 ## 结构与业务契约
 
 - `cold_exposure/input.py：运输与读数契约、时区和数值校验`
 - `cold_exposure/exposure.py：区间切分、覆盖与暴露语义`
 - `cold_exposure/pipeline.py：逐区间 JSON 与汇总 CSV`
 - `cold_exposure/consensus_input.py / consensus_engine.py / consensus_pipeline.py / consensus.py：v2 多记录仪共识的校验、端点扫描、汇总与独立 CLI`
+- `cold_exposure/flash/：CCLOG01 合成闪存镜像的二进制解析、双头选择、环形选槽、tick 展开、锚点契约、暂存发布与独立 CLI`
 - `docs/contract.md`：完整字段/格式、业务键、边界、输出含义与当前约束。
 - `docs/consensus.md`：v2 共识定义、未知语义、暴露边界、输出结构、兼容性与失败恢复。
+- `docs/flash.md`：CCLOG01 镜像/槽位/锚点协议、选头规则、时钟展开、审计结构与发布语义。
+- `tools/build_flash_examples.py`：可重复生成小型原创合成镜像与锚点示例。
 - `data/`：小型确定性合成输入和 `PROVENANCE.md`。
 - `tests/`：真实业务值、重复运行、重要边界和失败行为测试。
 

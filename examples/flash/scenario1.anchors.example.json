@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "device_id": "SYNTH-DEV-01",
+  "sensor_id": "SYNTH-SENSOR-01",
+  "anchors": [
+    {
+      "boot_id": 7,
+      "seq": 0,
+      "observed_at": "2026-01-01T00:00:02Z"
+    }
+  ]
+}
