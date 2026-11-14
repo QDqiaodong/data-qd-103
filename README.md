@@ -98,6 +98,28 @@ Python 调用为 `cold_exposure.flash.transcribe(image, anchors, output_dir)`；
 - 输出目录必须原先存在性检查通过且不跟随符号链接；两文件在同级私有暂存目录写好后一次改名发布，失败无正式半套结果、暂存被清理、输入不变、同目标可重跑。相同输入字节在两个新目录得到字节一致的产物；审计含两份头的原始 hex、每记录物理槽/偏移/完整 24 字节 hex 与 CSV 行号映射，但不保存整片镜像、不证明设备真实测量。
 - 转录不做运输窗口裁剪、插值、首尾补样、多记录仪融合或新增暴露指标；输出 CSV 表头仍为 `sensor_id,observed_at,temperature_c`，可直接配合既有 trips/assignments 进入 v1 或 v2 消费者。
 
+## 批次谱系召回库（独立 SQLite 入口，仅标准库）
+
+冷链批次经拆批、混批后，召回某些批次时需要确定波及哪些整批后代及其剩余库存。新增 `cold_exposure.recall` 子包读取批次 CSV（`lot_id,quantity_kg`）与流向 CSV（`source_lot,target_lot,quantity_kg`），校验谱系后把原文、摘要、批次与边写入 SQLite；召回查询为只读，v1/v2/flash/handoff 旧入口完全不变。该入口只作合成召回演练依据，**不判定法律范围或赔偿责任**。
+
+```sh
+python -m cold_exposure.recall build \
+    --lots examples/recall/lots.csv \
+    --flows examples/recall/flows.csv \
+    --output run/recall/genealogy.db
+python -m cold_exposure.recall recall \
+    --database run/recall/genealogy.db --lot RAW-MILK --lot RAW-SUGAR
+python -m cold_exposure.recall verify --database run/recall/genealogy.db
+```
+
+Python 调用为 `cold_exposure.recall.build_database(lots, flows, output_db)`、`recall_from_database(db, lot_ids)` 与 `verify_database(path)`。要点（完整定义见 `docs/recall.md`）：
+
+- 数量为正的有限十进制（1–12 位整数位、至多六位小数、拒绝指数记法），**不经 float**：字面量直接换算为整数微公斤，全部求和与剩余量计算都是整数运算；批次与边各自唯一、引用有效、拒绝自环。
+- 无入边者为原料；其余批次入量须恰好等于声明量，每批出量不得超量；谱系必须无环，边可任意乱序（拓扑序与行序无关）。
+- 召回可指定多个起点，未知 ID 拒绝；风险沿边传到**整批**后代，不把流量当污染质量；剩余=声明量−出量，菱形汇合与多起点重叠下每批只计量一次；证据追到两份输入的物理行号。
+- 两份原文连同 SHA-256、字节数与来源位置入库；数量以规范文本+整数微公斤双表示存储并互核。临时库通过全部库内复核（含由归档原文重建模型逐行比对）后才 `os.replace` 替换，失败保旧并清理临时文件；移走源文件后召回与复核照常，相同输入重建 SQL 转储相同。
+- 合成例覆盖菱形汇合、混批部分消耗、多起点重叠与无关支链；测试含独立手算的召回合计、循环/超耗/入量不等拒绝、写入失败保旧、重跑确定性与篡改复核失败。
+
 ## 结构与业务契约
 
 - `cold_exposure/input.py：运输与读数契约、时区和数值校验`
@@ -106,10 +128,12 @@ Python 调用为 `cold_exposure.flash.transcribe(image, anchors, output_dir)`；
 - `cold_exposure/consensus_input.py / consensus_engine.py / consensus_pipeline.py / consensus.py：v2 多记录仪共识的校验、端点扫描、汇总与独立 CLI`
 - `cold_exposure/flash/：CCLOG01 合成闪存镜像的二进制解析、双头选择、环形选槽、tick 展开、锚点契约、暂存发布与独立 CLI`
 - `cold_exposure/handoff/：交接履约集市，读取 v2 共识 JSON 与交接 CSV，按交接×UTC 午夜切归属事实并原子发布 SQLite，含只读复核`
+- `cold_exposure/recall/：批次谱系召回库，校验拆批/混批谱系（整数微公斤精确计量）并原子发布 SQLite，提供只读整批召回与复核`
 - `docs/contract.md`：完整字段/格式、业务键、边界、输出含义与当前约束。
 - `docs/consensus.md`：v2 共识定义、未知语义、暴露边界、输出结构、兼容性与失败恢复。
 - `docs/handoff.md`：交接契约、归属切分、SQLite 表结构、承运方日物化、原子发布/复核与手算示例。
 - `docs/flash.md`：CCLOG01 镜像/槽位/锚点协议、选头规则、时钟展开、审计结构与发布语义。
+- `docs/recall.md`：批次/流向 CSV 契约、整数微公斤计量、整批召回语义、SQLite 表结构、原子发布/复核与手算示例。
 - `tools/build_flash_examples.py`：可重复生成小型原创合成镜像与锚点示例。
 - `tools/build_handoff_example.py`：可重复生成交接集市所需的 v2 共识 JSON 与交接 CSV 合成例。
 - `data/`：小型确定性合成输入和 `PROVENANCE.md`。
